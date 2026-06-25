@@ -1,0 +1,14 @@
+# Environnement virtuel Python (TRES IMPORTANT A IGNORER)
+venv/
+env/
+
+# Fichiers caches de Python
+__pycache__/
+*.pyc
+
+# Le modèle lourd (Optionnel, mais recommandé si le fichier .pkl fait plus de 100 Mo)
+# models/best_pipeline.pkl
+
+# Fichiers systèmes Windows/Mac
+.DS_Store
+Thumbs.db
