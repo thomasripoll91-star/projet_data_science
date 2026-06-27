@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+
+  dashboard:
+    image: python:3.10-slim
+    container_name: churn_dashboard_data
+    ports:
+      - "8501:8501"
+    volumes:
+      # CORRECTION : On monte le code dans un dossier /app pour ne pas casser Linux
+      - .:/app
+    working_dir: /app
+    # CORRECTION : On commente le depends_on s'il n'y a pas d'API, 
+    # sinon décommentez les deux lignes suivantes :
+    # depends_on:
+    #   - api
+    command: bash -c "pip install --no-cache-dir -r requirement.txt && streamlit run dashboard.py --server.port=8501 --server.address=0.0.0.0"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - API_URL=http://api:8000
