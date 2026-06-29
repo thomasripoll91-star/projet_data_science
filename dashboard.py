@@ -49,7 +49,7 @@ st.set_page_config(page_title="CRM Predict - Rétention Client", layout="wide", 
 def load_models():
     # 1. Chargement du preprocessor et du modèle classique
     preprocessor = joblib.load('models/preprocessor.pkl')
-    xgb_model = joblib.load('models/xgb_model.pkl')
+    logreg = joblib.load('models/logreg.pkl')
     
     # 2. Chargement du modèle Deep Learning PyTorch
     # On charge l'état (les poids) sur le CPU (sécurité si le serveur n'a pas de carte graphique)
@@ -63,9 +63,9 @@ def load_models():
     dl_model.load_state_dict(state_dict)
     dl_model.eval() # On met le modèle en mode évaluation (désactive le dropout)
     
-    return preprocessor, xgb_model, dl_model
+    return preprocessor, logreg, dl_model
 
-preprocessor, xgb_model, dl_model = load_models()
+preprocessor, logreg, dl_model = load_models()
 
 @st.cache_data
 def load_data():
@@ -222,7 +222,7 @@ if predict_btn:
         
         # 2. Aiguillage selon le choix de la Sidebar
         if choix_modele == "XGBoost (Classique)":
-            probabilite = xgb_model.predict_proba(input_scaled)[0][1]
+            probabilite = logreg.predict_proba(input_scaled)[0][1]
         
         elif choix_modele == "Deep Learning (PyTorch)":
             # 1. Conversion sécurisée
@@ -290,7 +290,7 @@ if predict_btn:
         if choix_modele == "XGBoost (Classique)":
             st.write("*(Top 5 des critères pour XGBoost)*")
             try:
-                final_model = xgb_model.best_estimator_ if hasattr(xgb_model, 'best_estimator_') else xgb_model
+                final_model = logreg.best_estimator_ if hasattr(logreg, 'best_estimator_') else logreg
                 
                 if hasattr(final_model, 'feature_importances_'):
                     importances = final_model.feature_importances_
