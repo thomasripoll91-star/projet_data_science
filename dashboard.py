@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import plotly.express as px
+import plotly.graph_objects as go
 import os
 
 
@@ -197,25 +198,45 @@ if predict_btn:
         # Définition de la classe prédite (Seuil standard de 50%)
         prediction = 1 if probabilite >= 0.5 else 0
         
-        # --- AFFICHAGE DES RÉSULTATS ---
         res_col1, res_col2 = st.columns(2)
         
         with res_col1:
-            if prediction == 1:
-                st.error(f"⚠️ RISQUE ÉLEVÉ DE DÉPART ({probabilite*100:.1f}%)")
-                st.write("Ce profil est considéré comme **à risque**.")
-            else:
-                st.success(f"✅ CLIENT SÉCURISÉ ({probabilite*100:.1f}% de risque)")
-                st.write("Ce profil montre des **signaux stables**.")
+            fig_gauge = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=probabilite * 100,
+                domain={'x': [0, 1], 'y': [0, 1]},
+                title={'text': "<b>Score de Risque de Résiliation</b>", 'font': {'size': 20}},
+                number={'suffix': "%", 'valueformat': ".1f", 'font': {'size': 40}},
+                gauge={
+                    'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+                    'bar': {'color': "#FF4B4B" if prediction == 1 else "#0068C9"},
+                    'bgcolor': "white",
+                    'borderwidth': 2,
+                    'bordercolor': "gray",
+                    'steps': [
+                        {'range': [0, 50], 'color': "#e6f0fa"},  # Zone bleue claire (Safe)
+                        {'range': [50, 100], 'color': "#ffe6e6"} # Zone rouge claire (Danger)
+                    ],
+                    'threshold': {
+                        'line': {'color': "black", 'width': 4},
+                        'thickness': 0.75,
+                        'value': probabilite * 100
+                    }
+                }
+            ))
+            fig_gauge.update_layout(height=280, margin=dict(l=10, r=10, t=40, b=10))
+            st.plotly_chart(fig_gauge, use_container_width=True)
 
         with res_col2:
+            st.write("") # Espacement
+            st.write("")
             st.subheader("💡 Interprétation Métier")
             if prediction == 1:
-                st.markdown("- **Alerte :** Le modèle a détecté des signaux forts de résiliation.")
-                st.markdown("**Action recommandée :** Appel pro-actif avec remise de rétention.")
+                st.error("⚠️ Le client présente de forts signaux d'attrition.")
+                st.markdown("**Action recommandée :** Contact proactif par l'équipe Customer Success, analyse des points de friction et proposition d'une offre de rétention.")
             else:
-                st.markdown("- **Sécurisé :** Le client montre des signaux d'engagement stables.")
-                st.markdown("**Action recommandée :** Campagne de fidélisation classique (Upsell).")
+                st.success("✅ Le client est sain et engagé.")
+                st.markdown("**Action recommandée :** Poursuivre l'accompagnement standard, inclure dans les boucles de feedback et identifier des opportunités d'up-sell.")
                 
         # --- 8. INTERPRÉTABILITÉ ET GRAPHIQUE D'IMPORTANCE ---
         st.divider()
