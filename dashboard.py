@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+import shap
 import plotly.express as px
 import plotly.graph_objects as go
 import os
@@ -238,20 +239,22 @@ if predict_btn:
                 st.success("✅ Le client est sain et engagé.")
                 st.markdown("**Action recommandée :** Poursuivre l'accompagnement standard, inclure dans les boucles de feedback et identifier des opportunités d'up-sell.")
                 
-        # --- 8. INTERPRÉTABILITÉ ET GRAPHIQUE D'IMPORTANCE ---
+# --- 8. INTERPRÉTABILITÉ ET GRAPHIQUE D'IMPORTANCE ---
         st.divider()
         st.subheader("🧠 Ce qui influence ce profil")
         
         try:
-            # Vérification du type de modèle pour s'adapter dynamiquement
-            is_linear = hasattr(logreg_model, 'coef_')
-            is_tree = hasattr(logreg_model, 'feature_importances_')
+            # 1. DÉTECTION ROBUSTE : Extraction du modèle même s'il est dans un Pipeline
+            final_model = logreg_model.steps[-1][1] if hasattr(logreg_model, 'steps') else logreg_model
+            
+            is_linear = hasattr(final_model, 'coef_')
+            is_tree = hasattr(final_model, 'feature_importances_')
             
             if is_linear:
-                importances = logreg_model.coef_[0]
+                importances = final_model.coef_[0]
                 st.write("*(Analyse des coefficients du modèle linéaire)*")
             elif is_tree:
-                importances = logreg_model.feature_importances_
+                importances = final_model.feature_importances_
                 st.write("*(Analyse de l'importance des variables du modèle)*")
             else:
                 raise ValueError("Le modèle ne possède ni 'coef_' ni 'feature_importances_'.")
@@ -259,26 +262,25 @@ if predict_btn:
             feature_names = get_real_names(preprocessor)
             
             if len(importances) > 0 and len(feature_names) == len(importances):
-                # On crée un dataframe avec la valeur et sa valeur absolue
+                
+                # --- PRÉPARATION DES DONNÉES D'IMPORTANCE ---
                 df_importance = pd.DataFrame({
                     'Critère': feature_names,
                     'Valeur': importances,
                     'Impact_Absolu': abs(importances)
                 })
                 
-                # Nettoyage stylisé des noms (regex pour enlever les préfixes du preprocessor)
+                # Nettoyage des noms pour l'affichage
                 df_importance['Critère'] = (df_importance['Critère']
                                             .astype(str)
                                             .str.replace(r'^(cat__|num__|num_log__)', '', regex=True)
                                             .str.replace('_', ' ')
                                             .str.title()) 
                 
-                # On prend les 10 plus gros impacts (positifs ou négatifs)
+                # --- GRAPHIQUE 1 : RÈGLES GLOBALES ---
                 df_top = df_importance.sort_values(by='Impact_Absolu', ascending=False).head(10)
-                # On le trie dans l'ordre croissant pour l'affichage élégant avec Plotly
                 df_top = df_top.sort_values(by='Impact_Absolu', ascending=True)
                 
-                # Construction du graphique avec des améliorations visuelles (valeurs sur les barres, nettoyage des axes)
                 if is_linear:
                     df_top['Impact sur la rétention'] = np.where(df_top['Valeur'] > 0, 
                                                                  'Augmente le Risque (Churn)', 
@@ -288,49 +290,124 @@ if predict_btn:
                         'Fidélise le Client (Rétention)': '#0068C9'
                     }
                     
-                    fig4 = px.bar(df_top, 
-                                  x='Valeur', 
-                                  y='Critère', 
-                                  orientation='h',
-                                  color='Impact sur la rétention', 
-                                  color_discrete_map=color_discrete_map,
+                    fig4 = px.bar(df_top, x='Valeur', y='Critère', orientation='h',
+                                  color='Impact sur la rétention', color_discrete_map=color_discrete_map,
                                   text=df_top['Valeur'].apply(lambda x: f"{x:+.2f}"),
-                                  title="<b>Top 10 des critères ayant influencé la décision</b>")
-                                  
+                                  title="<b>Top 10 des règles globales du modèle</b>")
                     fig4.update_traces(textposition='outside')
-                    st.caption("💡 **Comment lire ce graphique ?** Les variables poussant vers la droite (en rouge) augmentent la probabilité de résiliation. Celles poussant vers la gauche (en bleu) retiennent le client.")
-
                 else:
-                    fig4 = px.bar(df_top, 
-                                  x='Valeur', 
-                                  y='Critère', 
-                                  orientation='h',
+                    fig4 = px.bar(df_top, x='Valeur', y='Critère', orientation='h',
                                   text=df_top['Valeur'].apply(lambda x: f"{x:.3f}"),
-                                  title="<b>Top 10 des critères les plus importants</b>",
-                                  color='Valeur',
-                                  color_continuous_scale='Reds')
-                                  
+                                  title="<b>Top 10 des critères les plus importants (Global)</b>",
+                                  color='Valeur', color_continuous_scale='Reds')
                     fig4.update_traces(textposition='outside')
                     fig4.update_layout(coloraxis_showscale=False)
-                    st.caption("💡 **Comment lire ce graphique ?** Il représente l'importance relative de chaque critère dans la décision du modèle (plus la barre est grande, plus le critère est décisif).")
                 
-                # Design global épuré
                 fig4.update_layout(
-                    plot_bgcolor='rgba(0,0,0,0)', 
-                    margin=dict(l=0, r=40, t=40, b=0),
+                    plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=40, t=40, b=0),
                     xaxis=dict(title="", showgrid=False, zeroline=False, showticklabels=False),
-                    yaxis=dict(title=""),
-                    showlegend=True if is_linear else False,
+                    yaxis=dict(title=""), showlegend=True if is_linear else False,
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
-                
                 st.plotly_chart(fig4, use_container_width=True)
+
+                # --- GRAPHIQUE 2 : IMPACT SPÉCIFIQUE AU CLIENT (LOCAL) ---
+                st.markdown("### 🎯 Ce qui a déterminé le score de CE client")
                 
+                has_local = False
+                df_local_top = None
+                
+                if is_linear:
+                    # Sécurisation du format : Conversion en array dense si c'est une matrice creuse
+                    if hasattr(input_scaled, "toarray"):
+                        input_array = input_scaled.toarray()[0]
+                    else:
+                        input_array = input_scaled[0]
+                        
+                    local_importances = importances * input_array
+                    
+                    df_local = pd.DataFrame({
+                        'Critère': df_importance['Critère'],
+                        'Impact_Client': local_importances,
+                        'Impact_Absolu': abs(local_importances)
+                    })
+                    
+                    df_local_top = df_local.sort_values(by='Impact_Absolu', ascending=False).head(10)
+                    df_local_top = df_local_top.sort_values(by='Impact_Absolu', ascending=True)
+                    has_local = True
+                    
+                else:
+                    # INTÉGRATION SHAP POUR LES MODÈLES D'ARBRES
+                    try:
+                        import shap
+                        if hasattr(input_scaled, "toarray"):
+                            input_array = input_scaled.toarray()
+                        else:
+                            input_array = input_scaled
+                            
+                        explainer = shap.TreeExplainer(final_model)
+                        shap_values_raw = explainer.shap_values(input_array)
+                        
+                        if isinstance(shap_values_raw, list):
+                            local_importances = shap_values_raw[1][0]
+                        elif len(shap_values_raw.shape) == 3:
+                            local_importances = shap_values_raw[0, :, 1]
+                        else:
+                            local_importances = shap_values_raw[0]
+                            
+                        df_local = pd.DataFrame({
+                            'Critère': df_importance['Critère'],
+                            'Impact_Client': local_importances,
+                            'Impact_Absolu': abs(local_importances)
+                        })
+                        
+                        df_local_top = df_local.sort_values(by='Impact_Absolu', ascending=False).head(10)
+                        df_local_top = df_local_top.sort_values(by='Impact_Absolu', ascending=True)
+                        has_local = True
+                    except Exception as e_shap:
+                        st.error(f"Le graphique d'impact individuel (SHAP) n'a pas pu être généré : {e_shap}")
+                
+                # Rendu visuel propre et adaptatif avec Plotly Express
+                if has_local and df_local_top is not None:
+                    df_local_top["Légende d'impact"] = np.where(df_local_top['Impact_Client'] > 0, 
+                                                                   'Pousse au Churn (Risque)', 
+                                                                   'Favorise la Rétention (Sécurité)')
+                    color_discrete_map_local = {
+                        'Pousse au Churn (Risque)': '#FF4B4B', 
+                        'Favorise la Rétention (Sécurité)': '#0068C9'
+                    }
+                    
+                    fig_local = px.bar(
+                        df_local_top, 
+                        x='Impact_Client', 
+                        y='Critère', 
+                        orientation='h',
+                        color="Légende d'impact", 
+                        color_discrete_map=color_discrete_map_local,
+                        text=df_local_top['Impact_Client'].apply(lambda x: f"{x:+.2f}" if is_linear else f"{x:+.3f}"),
+                        title="<b>Profil simulé : Les forces en présence pour ce client</b>"
+                    )
+                    
+                    # textposition='outside' sans spécifier de couleur forcée -> Plotly adapte le texte au thème (Blanc en mode sombre)
+                    fig_local.update_traces(textposition='outside')
+                    
+                    fig_local.update_layout(
+                        plot_bgcolor='rgba(0,0,0,0)', 
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        xaxis=dict(title="Contribution finale au score", showgrid=True, gridcolor='rgba(200, 200, 200, 0.2)'),
+                        yaxis=dict(title=""),
+                        margin=dict(l=0, r=40, t=50, b=40), 
+                        height=450, 
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    
+                    st.plotly_chart(fig_local, use_container_width=True)
+                    st.caption("💡 **Comment lire ce graphique ?** Ce visuel isole les données saisies et montre précisément ce qui fait pencher la balance vers le Churn (Rouge) ou la Rétention (Bleu) pour ce client précis.")
             else:
                 st.warning("Oups, les noms de colonnes n'ont pas pu être alignés avec les variables.")
                 
         except Exception as e_graph:
-            st.error(f"Le graphique d'importance n'a pas pu être généré : {e_graph}")
+            st.error(f"Erreur lors de la génération des graphiques : {e_graph}")
 
     except Exception as e:
         st.error(f"Erreur inattendue lors de la prédiction : {e}")

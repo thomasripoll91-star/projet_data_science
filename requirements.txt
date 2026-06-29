@@ -8,3 +8,4 @@ uvicorn
 plotly
 shap
 torch
+shap
