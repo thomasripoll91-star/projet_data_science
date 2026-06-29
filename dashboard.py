@@ -3,8 +3,6 @@ import pandas as pd
 import numpy as np
 import joblib
 import plotly.express as px
-import torch
-import torch.nn as nn
 import os
 
 
@@ -22,24 +20,6 @@ def get_real_names(prep):
         else:
             names.extend(columns)
     return names
-# --- 0. ARCHITECTURE DU RÉSEAU DE NEURONES ---
-class ChurnModel(nn.Module):
-    def __init__(self, input_dim):
-        super(ChurnModel, self).__init__()
-        self.layer1 = nn.Linear(input_dim, 64)
-        self.relu1 = nn.ReLU()
-        self.dropout1 = nn.Dropout(0.3)
-        self.layer2 = nn.Linear(64, 32)
-        self.relu2 = nn.ReLU()
-        self.dropout2 = nn.Dropout(0.2)
-        self.output_layer = nn.Linear(32, 1)
-        self.sigmoid = nn.Sigmoid()
-        
-    def forward(self, x):
-        x = self.dropout1(self.relu1(self.layer1(x)))
-        x = self.dropout2(self.relu2(self.layer2(x)))
-        x = self.sigmoid(self.output_layer(x))
-        return x
 
 # --- 1. CONFIGURATION DE LA PAGE ---
 st.set_page_config(page_title="CRM Predict - Rétention Client", layout="wide", page_icon="📊")
@@ -47,25 +27,14 @@ st.set_page_config(page_title="CRM Predict - Rétention Client", layout="wide", 
 # --- 2. CHARGEMENT DES MODÈLES & DES VRAIES DONNÉES ---
 @st.cache_resource
 def load_models():
-    # 1. Chargement du preprocessor et du modèle classique
+    # Chargement du preprocessor et du modèle de Régression Logistique
     preprocessor = joblib.load('models/preprocessor.pkl')
-    logreg = joblib.load('models/logreg.pkl')
+    # Assurez-vous que le modèle de régression logistique a été sauvegardé sous ce nom
+    logreg_model = joblib.load('models/logreg.pkl') 
     
-    # 2. Chargement du modèle Deep Learning PyTorch
-    # On charge l'état (les poids) sur le CPU (sécurité si le serveur n'a pas de carte graphique)
-    state_dict = torch.load('models/dl_model.pth', map_location=torch.device('cpu'), weights_only=True)
-    
-    # Astuce : on déduit dynamiquement l'input_dim en regardant la taille de la première couche sauvegardée
-    input_dim = state_dict['layer1.weight'].shape[1] 
-    
-    # On instancie le modèle et on lui injecte ses poids
-    dl_model = ChurnModel(input_dim)
-    dl_model.load_state_dict(state_dict)
-    dl_model.eval() # On met le modèle en mode évaluation (désactive le dropout)
-    
-    return preprocessor, logreg, dl_model
+    return preprocessor, logreg_model
 
-preprocessor, logreg, dl_model = load_models()
+preprocessor, logreg_model = load_models()
 
 @st.cache_data
 def load_data():
@@ -87,39 +56,40 @@ Cette interface permet aux équipes Customer Success d'évaluer en temps réel l
 # --- 4. BARRE LATÉRALE : SAISIE DES DONNÉES (SIMULATEUR) ---
 st.sidebar.header("⚙️ Simuler un profil client")
 st.sidebar.markdown("---")
-st.sidebar.subheader("🧠 Moteur d'Intelligence Artificielle")
-choix_modele = st.sidebar.radio(
-    "Choisissez le modèle de prédiction :",
-    ("XGBoost (Classique)", "Deep Learning (PyTorch)")
-)
+st.sidebar.info("🧠 **Modèle actif :** Régression Logistique")
 st.sidebar.markdown("---")
 
 with st.sidebar.expander("👤 Profil & Contrat", expanded=True):
-    customer_segment = st.selectbox("Segment Client", ["SME", "Individual", "Enterprise"])
-    contract_type = st.selectbox("Type de contrat", ["Monthly", "Yearly"]) 
-    signup_channel = st.selectbox("Canal d'acquisition", ["Web", "Mobile", "Referral"])
+    customer_segment = st.selectbox("Segment Client", ['SME', 'Individual', 'Enterprise'])
+    contract_type = st.selectbox("Type de contrat", ['Monthly', 'Yearly', 'Quarterly']) 
+    signup_channel = st.selectbox("Canal d'acquisition", ['Web', 'Mobile', 'Referral'])
+    # Champ conservé car non listé dans les modifications :
     tenure_months = st.number_input("Ancienneté (mois)", min_value=0, value=12)
 
 with st.sidebar.expander("💰 Finances", expanded=True):
-    monthly_fee = st.number_input("Abonnement mensuel (€)", min_value=0.0, value=49.99)
+    monthly_fee = st.selectbox("Abonnement mensuel (€)", [10, 20, 30, 50, 70, 100], index=2)
+    # Champ conservé car non listé dans les modifications :
     total_revenue = st.number_input("Chiffre d'affaires généré (€)", min_value=0.0, value=500.0)
-    discount_applied = st.selectbox("Réduction appliquée ?", ["Yes", "No"])
-    price_increase_last_3m = st.selectbox("Hausse de prix (3 derniers mois) ?", ["No", "Yes"])
+    discount_applied = st.selectbox("Réduction appliquée ?", ['Yes', 'No'])
+    price_increase_last_3m = st.selectbox("Hausse de prix (3 derniers mois) ?", ['No', 'Yes'])
     payment_failures = st.selectbox("Échecs de paiement récents ?", [0, 1, 2, 3, 4, 5])
 
 with st.sidebar.expander("🛠️ Support & Satisfaction", expanded=True):
-    csat_score = st.slider("Satisfaction Client (CSAT)", 1.0, 5.0, 3.0, step=0.5)
-    survey_response = st.selectbox("Note au dernier sondage", ["Satisfied", "Neutral", "Unsatisfied"])
-    support_tickets = st.number_input("Tickets de support ouverts", min_value=0, value=1)
-    escalations = st.number_input("Nombre de plaintes (Escalations)", min_value=0, value=0)
+    csat_score = st.selectbox("Satisfaction Client (CSAT)", [1.0, 2.0, 3.0, 4.0, 5.0], index=2)
+    survey_response = st.selectbox("Note au dernier sondage", ['Satisfied', 'Neutral', 'Unsatisfied'])
+    support_tickets = st.selectbox("Tickets de support ouverts", [0, 1, 2, 3, 4, 5, 6, 7])
+    escalations = st.selectbox("Nombre de plaintes (Escalations)", [0, 1, 2, 3, 4])
+    # Champ conservé car non listé dans les modifications :
     avg_resolution_time = st.number_input("Temps moyen de résolution (heures)", min_value=0.0, value=24.0)
 
 with st.sidebar.expander("📈 Engagement (Usage)", expanded=True):
+    # Champs conservés car non listés dans les modifications :
     last_login_days_ago = st.number_input("Jours depuis dernière connexion", min_value=0.0, value=15.0)
     monthly_logins = st.number_input("Connexions ce mois-ci", min_value=0, value=15)
-    weekly_active_days = st.slider("Jours actifs par semaine", 0, 7, 3)
-    features_used = st.number_input("Fonctionnalités utilisées", min_value=1, value=5)
-    referral_count = st.number_input("Nombre de parrainages", min_value=0, value=0)
+    
+    weekly_active_days = st.selectbox("Jours actifs par semaine", [0, 1, 2, 3, 4, 5, 6, 7], index=3)
+    features_used = st.selectbox("Fonctionnalités utilisées", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], index=4)
+    referral_count = st.selectbox("Nombre de parrainages", [0, 1, 2, 3, 4, 5, 6, 7])
 
 predict_btn = st.sidebar.button("🔮 Calculer le risque", use_container_width=True)
 
@@ -156,7 +126,7 @@ with col_graph1:
     st.plotly_chart(fig1, use_container_width=True)
 
 with col_graph2:
-    # Graphique 2 (NOUVEAU) : Comparaison des moyennes d'engagement
+    # Graphique 2 : Comparaison des moyennes d'engagement
     engagement_metrics = df.groupby('Statut Client')[['monthly_logins', 'weekly_active_days', 'features_used']].mean().reset_index()
     engagement_melted = engagement_metrics.melt(id_vars='Statut Client', var_name='Métrique', value_name='Moyenne')
     
@@ -203,9 +173,10 @@ if predict_btn:
             'monthly_logins': [monthly_logins],
             'weekly_active_days': [weekly_active_days],
             'features_used': [features_used],
-            'last_login_days_ago': [np.log(max(1.0, last_login_days_ago))],
+            # On retire np.log car le pipeline s'en charge déjà
+            'last_login_days_ago': [last_login_days_ago],
             'monthly_fee': [monthly_fee],
-            'total_revenue': [np.log(max(1.0, total_revenue))],
+            'total_revenue': [total_revenue],
             'payment_failures': [payment_failures],
             'discount_applied': [discount_applied],
             'price_increase_last_3m': [price_increase_last_3m],
@@ -220,45 +191,8 @@ if predict_btn:
         # 1. Transformation des données saisies
         input_scaled = preprocessor.transform(input_data)
         
-        # 2. Aiguillage selon le choix de la Sidebar
-        if choix_modele == "XGBoost (Classique)":
-            probabilite = logreg.predict_proba(input_scaled)[0][1]
-        
-        elif choix_modele == "Deep Learning (PyTorch)":
-            # 1. Conversion sécurisée
-            if hasattr(input_scaled, "toarray"):
-                X_array = input_scaled.toarray().astype(np.float32)
-            else:
-                X_array = np.array(input_scaled, dtype=np.float32)
-            
-            X_tensor = torch.tensor(X_array)
-            
-            # 2. Prédiction avec extraction des activations
-            with torch.no_grad():
-                probabilite = dl_model(X_tensor).item()
-                
-            # --- NOUVELLE INTERPRÉTATION POUR LE DL ---
-            st.subheader("🧠 Analyse du Profil (Deep Learning)")
-            
-            # A. Affichage de la confiance du modèle
-            confiance = probabilite if probabilite > 0.5 else 1 - probabilite
-            st.write(f"**Niveau de certitude du modèle :** {confiance*100:.1f}%")
-            
-            # B. Analyse des variables à impact (Approximation)
-            # Puisqu'on n'a pas SHAP, on affiche les variables les plus élevées après scaling
-            st.write("**Variables les plus activées pour ce profil :**")
-            # On prend les 3 variables avec les valeurs les plus hautes après le preprocessing
-            idx_top = np.argsort(np.abs(X_array[0]))[-3:]
-            feature_names = get_real_names(preprocessor) # Utilise la fonction que vous avez déjà
-            top_features = [feature_names[i] for i in idx_top]
-            
-            st.info("Les caractéristiques les plus significatives de ce client selon le modèle sont : " + ", ".join(top_features))
-            
-            st.markdown("""
-            *Note : Le réseau de neurones capture des interactions non-linéaires complexes. 
-            Les variables ci-dessus sont celles qui présentent les écarts les plus importants 
-            par rapport à la moyenne de la base client.*
-            """)
+        # 2. Prédiction par la Régression Logistique
+        probabilite = logreg_model.predict_proba(input_scaled)[0][1]
 
         # Définition de la classe prédite (Seuil standard de 50%)
         prediction = 1 if probabilite >= 0.5 else 0
@@ -269,10 +203,10 @@ if predict_btn:
         with res_col1:
             if prediction == 1:
                 st.error(f"⚠️ RISQUE ÉLEVÉ DE DÉPART ({probabilite*100:.1f}%)")
-                st.write("Ce profil correspond à notre **Cluster 0** (Clients en détresse).")
+                st.write("Ce profil est considéré comme **à risque**.")
             else:
                 st.success(f"✅ CLIENT SÉCURISÉ ({probabilite*100:.1f}% de risque)")
-                st.write("Ce profil correspond à notre **Cluster 1 ou 2**.")
+                st.write("Ce profil montre des **signaux stables**.")
 
         with res_col2:
             st.subheader("💡 Interprétation Métier")
@@ -285,74 +219,97 @@ if predict_btn:
                 
         # --- 8. INTERPRÉTABILITÉ ET GRAPHIQUE D'IMPORTANCE ---
         st.divider()
-        st.subheader("🧠 Ce qui a influencé l'algorithme")
+        st.subheader("🧠 Ce qui influence ce profil")
         
-        if choix_modele == "XGBoost (Classique)":
-            st.write("*(Top 5 des critères pour XGBoost)*")
-            try:
-                final_model = logreg.best_estimator_ if hasattr(logreg, 'best_estimator_') else logreg
+        try:
+            # Vérification du type de modèle pour s'adapter dynamiquement
+            is_linear = hasattr(logreg_model, 'coef_')
+            is_tree = hasattr(logreg_model, 'feature_importances_')
+            
+            if is_linear:
+                importances = logreg_model.coef_[0]
+                st.write("*(Analyse des coefficients du modèle linéaire)*")
+            elif is_tree:
+                importances = logreg_model.feature_importances_
+                st.write("*(Analyse de l'importance des variables du modèle)*")
+            else:
+                raise ValueError("Le modèle ne possède ni 'coef_' ni 'feature_importances_'.")
                 
-                if hasattr(final_model, 'feature_importances_'):
-                    importances = final_model.feature_importances_
-                elif hasattr(final_model, 'coef_'):
-                    importances = final_model.coef_[0]
-                else:
-                    importances = []
-
-                def get_real_names(prep):
-                    ct = prep.steps[0][1] if hasattr(prep, 'steps') else prep
-                    names = []
-                    for name, transformer, columns in ct.transformers_:
-                        if name == 'remainder' and transformer == 'drop':
-                            continue
-                        if hasattr(transformer, 'get_feature_names_out'):
-                            try:
-                                names.extend(transformer.get_feature_names_out(columns))
-                            except:
-                                names.extend(columns)
-                        else:
-                            names.extend(columns)
-                    return names
+            feature_names = get_real_names(preprocessor)
+            
+            if len(importances) > 0 and len(feature_names) == len(importances):
+                # On crée un dataframe avec la valeur et sa valeur absolue
+                df_importance = pd.DataFrame({
+                    'Critère': feature_names,
+                    'Valeur': importances,
+                    'Impact_Absolu': abs(importances)
+                })
                 
-                feature_names = get_real_names(preprocessor)
+                # Nettoyage stylisé des noms (regex pour enlever les préfixes du preprocessor)
+                df_importance['Critère'] = (df_importance['Critère']
+                                            .astype(str)
+                                            .str.replace(r'^(cat__|num__|num_log__)', '', regex=True)
+                                            .str.replace('_', ' ')
+                                            .str.title()) 
                 
-                if len(importances) > 0 and len(feature_names) == len(importances):
-                    df_importance = pd.DataFrame({
-                        'Critère': feature_names,
-                        'Poids (%)': abs(np.array(importances)) * 100
-                    }).sort_values(by='Poids (%)', ascending=False).head(5)
+                # On prend les 10 plus gros impacts (positifs ou négatifs)
+                df_top = df_importance.sort_values(by='Impact_Absolu', ascending=False).head(10)
+                # On le trie dans l'ordre croissant pour l'affichage élégant avec Plotly
+                df_top = df_top.sort_values(by='Impact_Absolu', ascending=True)
+                
+                # Construction du graphique avec des améliorations visuelles (valeurs sur les barres, nettoyage des axes)
+                if is_linear:
+                    df_top['Impact sur la rétention'] = np.where(df_top['Valeur'] > 0, 
+                                                                 'Augmente le Risque (Churn)', 
+                                                                 'Fidélise le Client (Rétention)')
+                    color_discrete_map = {
+                        'Augmente le Risque (Churn)': '#FF4B4B', 
+                        'Fidélise le Client (Rétention)': '#0068C9'
+                    }
                     
-                    df_importance['Critère'] = (df_importance['Critère']
-                                                .astype(str)
-                                                .str.replace('cat__', '')
-                                                .str.replace('num__', '')
-                                                .str.replace('num_log__', '')
-                                                .str.replace('_', ' ')
-                                                .str.title()) 
-                    
-                    df_importance = df_importance.sort_values(by='Poids (%)', ascending=True) 
-                    fig4 = px.bar(df_importance, x='Poids (%)', y='Critère', orientation='h',
-                                  text=df_importance['Poids (%)'].apply(lambda x: f"{x:.1f}%"),
-                                  color='Poids (%)', color_continuous_scale='Reds')
-                    
+                    fig4 = px.bar(df_top, 
+                                  x='Valeur', 
+                                  y='Critère', 
+                                  orientation='h',
+                                  color='Impact sur la rétention', 
+                                  color_discrete_map=color_discrete_map,
+                                  text=df_top['Valeur'].apply(lambda x: f"{x:+.2f}"),
+                                  title="<b>Top 10 des critères ayant influencé la décision</b>")
+                                  
                     fig4.update_traces(textposition='outside')
-                    fig4.update_layout(plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=20, t=20, b=0), coloraxis_showscale=False)
-                    st.plotly_chart(fig4, use_container_width=True)
-                    
-                    st.caption("Ce graphique illustre de manière transparente les variables réelles ayant le plus pesé dans la décision de l'IA.")
+                    st.caption("💡 **Comment lire ce graphique ?** Les variables poussant vers la droite (en rouge) augmentent la probabilité de résiliation. Celles poussant vers la gauche (en bleu) retiennent le client.")
+
                 else:
-                    st.warning("Oups, les noms de colonnes n'ont pas pu être alignés avec les coefficients.")
-                    
-            except Exception as e_graph:
-                st.error(f"Le graphique n'a pas pu être généré : {e_graph}")
+                    fig4 = px.bar(df_top, 
+                                  x='Valeur', 
+                                  y='Critère', 
+                                  orientation='h',
+                                  text=df_top['Valeur'].apply(lambda x: f"{x:.3f}"),
+                                  title="<b>Top 10 des critères les plus importants</b>",
+                                  color='Valeur',
+                                  color_continuous_scale='Reds')
+                                  
+                    fig4.update_traces(textposition='outside')
+                    fig4.update_layout(coloraxis_showscale=False)
+                    st.caption("💡 **Comment lire ce graphique ?** Il représente l'importance relative de chaque critère dans la décision du modèle (plus la barre est grande, plus le critère est décisif).")
                 
-        elif choix_modele == "Deep Learning (PyTorch)":
-            st.info(
-                "**Effet Boîte Noire (Black Box) :** Contrairement aux modèles par arbres (XGBoost), "
-                "ce réseau de neurones artificiels utilise des couches cachées pour capter des corrélations très complexes et non linéaires. "
-                "Il n'est donc pas possible d'isoler instantanément le poids individuel de chaque "
-                "critère sans intégrer des outils d'explicabilité avancés (comme SHAP ou LIME)."
-            )
+                # Design global épuré
+                fig4.update_layout(
+                    plot_bgcolor='rgba(0,0,0,0)', 
+                    margin=dict(l=0, r=40, t=40, b=0),
+                    xaxis=dict(title="", showgrid=False, zeroline=False, showticklabels=False),
+                    yaxis=dict(title=""),
+                    showlegend=True if is_linear else False,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                
+                st.plotly_chart(fig4, use_container_width=True)
+                
+            else:
+                st.warning("Oups, les noms de colonnes n'ont pas pu être alignés avec les variables.")
+                
+        except Exception as e_graph:
+            st.error(f"Le graphique d'importance n'a pas pu être généré : {e_graph}")
 
     except Exception as e:
         st.error(f"Erreur inattendue lors de la prédiction : {e}")
